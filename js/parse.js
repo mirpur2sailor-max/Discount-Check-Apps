@@ -99,15 +99,39 @@
       keys: Object.keys(keys), barcodes: Object.keys(bcs) };
   }
 
+  /* Pull list: same file shape (STYLE_CODE + COLOR), but no discount % */
+  function parsePullList(XLSX, buf, name) {
+    var l = parseDiscountList(XLSX, buf, 1, name);
+    return { name: name || 'পুল লিস্ট', added: l.added, keys: l.keys, barcodes: l.barcodes };
+  }
+
+  var ACC_LABELS = ['ACCESSORIES', 'FOOTWEAR', 'FOOTWEAR ACCESSORIES', 'CARRIER'];
+
   function defaultDiscounts() {
     return {
-      version: 1, updated: new Date().toISOString().slice(0, 10),
-      yearRule: { maxYear: 2024, pct: 50, note: 'A02 (সিজন) এর বছর এই বছর বা তার আগের হলে' },
-      vat: { garments: 10, accessories: 7.5, accessoryLabels: ['ACCESSORIES', 'FOOTWEAR ACCESSORIES'] },
-      lists: []
+      version: 2, updated: new Date().toISOString().slice(0, 10),
+      defaultPct: 0,
+      yearRule: { enabled: true, maxYear: 2024, pct: 50 },
+      lists: [], pull: null,
+      vat: { garments: 10, accessories: 7.5, accessoryLabels: ACC_LABELS.slice() }
     };
   }
 
-  var api = { norm: norm, parseStock: parseStock, parseDiscountList: parseDiscountList, defaultDiscounts: defaultDiscounts };
+  /* accepts old (v1) and new (v2) discounts.json */
+  function normalizeDiscounts(d) {
+    var n = defaultDiscounts(); d = d || {};
+    n.updated = d.updated || n.updated;
+    n.defaultPct = Number(d.defaultPct) || 0;
+    var y = d.yearRule || {};
+    n.yearRule = { enabled: y.enabled !== false && y.pct != null, maxYear: Number(y.maxYear) || 2024, pct: y.pct != null ? Number(y.pct) : 50 };
+    n.lists = (d.lists || []).map(function (l) { return { pct: Number(l.pct), name: l.name || '', added: l.added || '', keys: l.keys || [], barcodes: l.barcodes || [] }; });
+    n.pull = d.pull && ((d.pull.keys || []).length || (d.pull.barcodes || []).length) ? { name: d.pull.name || 'পুল লিস্ট', added: d.pull.added || '', keys: d.pull.keys || [], barcodes: d.pull.barcodes || [] } : null;
+    var v = d.vat || {};
+    n.vat = { garments: v.garments != null ? Number(v.garments) : 10, accessories: v.accessories != null ? Number(v.accessories) : 7.5,
+      accessoryLabels: (v.accessoryLabels || ACC_LABELS).map(function (x) { return String(x).trim().toUpperCase(); }) };
+    return n;
+  }
+
+  var api = { norm: norm, parseStock: parseStock, parseDiscountList: parseDiscountList, parsePullList: parsePullList, defaultDiscounts: defaultDiscounts, normalizeDiscounts: normalizeDiscounts };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.SailorParse = api;
 })(typeof self !== 'undefined' ? self : this);

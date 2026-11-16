@@ -78,46 +78,65 @@
     </div>
 
     <div class="card">
-      <h3>২. ডিসকাউন্ট লিস্ট</h3>
-      <p class="muted">যেমন ৩০% সিলেক্টেড গুডস শিট। স্টাইল+কালার (বা বারকোড) কলাম থাকলেই হবে।</p>
+      <h3>২. পুল লিস্ট</h3>
+      <p class="muted">অফিসের Pull Excel দিন (STYLE_CODE ও COLOR কলাম)। এই পণ্যে কোনো ডিসকাউন্ট নেই — স্ক্যানে "পুল" দেখাবে। নতুন পুল লিস্ট দিলে পুরোনোটি বদলে যায়।</p>
+      <input id="filePull" type="file" accept=".xlsx,.xls" hidden>
+      <button class="primary" data-pick="filePull">পুল ফাইল বাছুন</button>
+      <div id="pullPrev" class="prev"></div>
+    </div>
+
+    <div class="card">
+      <h3>৩. ডিসকাউন্ট লিস্ট (ঐচ্ছিক)</h3>
+      <p class="muted">নির্দিষ্ট কিছু পণ্যের জন্য ৩০%, ৪০%, ৫০% বা যেকোনো % এর লিস্ট। একই % এর নতুন লিস্ট পুরোনোটি বদলায়।</p>
       <label class="fld">ডিসকাউন্ট %
         <input id="listPct" type="number" min="1" max="99" step="0.5" value="30" inputmode="decimal">
       </label>
       <input id="fileDisc" type="file" accept=".xlsx,.xls" hidden>
       <button class="primary" data-pick="fileDisc">ডিসকাউন্ট ফাইল বাছুন</button>
       <div id="discPrev" class="prev"></div>
-      <div id="listsBox"></div>
     </div>
 
     <div class="card">
-      <h3>৩. নিয়ম (বছর ও ভ্যাট)</h3>
+      <h3>৪. অফারের নিয়ম</h3>
+      <label class="fld">বাকি সব পণ্যে ডিসকাউন্ট % (পুল ও লিস্টের বাইরে) — না থাকলে 0
+        <input id="defPct" type="number" inputmode="decimal" min="0" max="99" step="0.5">
+      </label>
+      <label class="chk"><input type="checkbox" id="yearOn"> সিজন (A02) এর বছর ভিত্তিক ডিসকাউন্ট</label>
       <div class="grid2">
-        <label class="fld">এই বছর ও আগের (A02) পণ্য
+        <label class="fld">এই বছর ও আগের পণ্য
           <input id="ruleYear" type="number" inputmode="numeric" min="2000" max="2100">
         </label>
         <label class="fld">তাদের ডিসকাউন্ট %
           <input id="rulePct" type="number" inputmode="decimal" min="0" max="99" step="0.5">
         </label>
-        <label class="fld">গার্মেন্টস/অন্যান্য ভ্যাট %
-          <input id="vatGar" type="number" inputmode="decimal" min="0" max="100" step="0.5">
-        </label>
-        <label class="fld">একসেসোরিজ ভ্যাট %
-          <input id="vatAcc" type="number" inputmode="decimal" min="0" max="100" step="0.5">
-        </label>
       </div>
-      <label class="fld">একসেসোরিজ ধরা হবে যে LABEL গুলোকে (কমা দিয়ে)
-        <input id="accLabels" type="text">
-      </label>
+      <h4 class="sub">লোড করা লিস্ট</h4>
+      <div id="listsBox"></div>
+      <button id="clearOffer" class="link">নতুন অফার শুরু: সব লিস্ট ও পুল মুছুন</button>
     </div>
 
     <div class="card">
-      <h3>৪. প্রয়োগ করুন</h3>
+      <h3>৫. ভ্যাট</h3>
+      <div class="grid2">
+        <label class="fld">গার্মেন্টস/অন্যান্য %
+          <input id="vatGar" type="number" inputmode="decimal" min="0" max="100" step="0.5">
+        </label>
+        <label class="fld">একসেসোরিজ/ফুটওয়্যার %
+          <input id="vatAcc" type="number" inputmode="decimal" min="0" max="100" step="0.5">
+        </label>
+      </div>
+      <p class="muted small">নিচের যে LABEL গুলো হাইলাইট করা (গাঢ় বর্ডার), সেগুলোতে একসেসোরিজ/ফুটওয়্যার ভ্যাট প্রযোজ্য। চাপ দিয়ে বদলান।</p>
+      <div id="accChips" class="chips"></div>
+    </div>
+
+    <div class="card">
+      <h3>৬. প্রয়োগ করুন</h3>
       <div class="btns">
         <button id="applyLocal" class="primary">এই ফোনে ব্যবহার করুন</button>
         <button id="dlStock" class="ghost">⬇ stock.json</button>
         <button id="dlDisc" class="ghost">⬇ discounts.json</button>
       </div>
-      <p class="muted small">সবার (সব ডিভাইসের) জন্য আপডেট করতে ডাউনলোড করা ফাইল GitHub-এর <code>data</code> ফোল্ডারে আপলোড করুন (README দেখুন)।</p>
+      <p class="muted small">সবার ফোনে আপডেট করতে ডাউনলোড করা ফাইল GitHub-এর <code>data</code> ফোল্ডারে আপলোড করুন।</p>
       <button id="resetLocal" class="link">ফোনে রাখা ফাইল মুছে GitHub ডেটায় ফিরে যান</button>
     </div>
 

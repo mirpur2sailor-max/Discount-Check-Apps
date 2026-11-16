@@ -14,7 +14,7 @@
     return n.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   };
   var pctTxt = function (p) { return (Math.round(p * 100) / 100).toString(); };
-  var cls = function (p) { return p >= 50 ? 'd50' : p > 0 ? 'd30' : 'd0'; };
+  var cls = function (p) { return p === -2 ? 'pull' : p >= 50 ? 'd50' : p > 0 ? 'd30' : 'd0'; };
   var cleanSize = function (s) { return (!s || /^(0|NA|N\/A|-)$/i.test(s)) ? '—' : s; };
   var toastT;
   function toast(msg) {
@@ -42,22 +42,29 @@
   function seasonYear(s) { var m = String(s || '').match(/(?:19|20)\d{2}/g); return m ? +m[m.length - 1] : null; }
 
   function build() {
-    var st = S.stock, d = S.disc, rule = d.yearRule || {}, vat = d.vat || {};
-    var acc = new Set((vat.accessoryLabels || []).map(norm));
-    var lists = (d.lists || []).map(function (l) { return { pct: l.pct, name: l.name, keys: new Set(l.keys || []), bcs: new Set(l.barcodes || []) }; });
+    var st = S.stock, d = S.disc = SailorParse.normalizeDiscounts(S.disc), rule = d.yearRule, vat = d.vat;
+    var acc = new Set(vat.accessoryLabels.map(norm));
+    var lists = d.lists.map(function (l) { return { pct: l.pct, name: l.name, keys: new Set(l.keys), bcs: new Set(l.barcodes) }; });
+    var pull = d.pull ? { keys: new Set(d.pull.keys), bcs: new Set(d.pull.barcodes) } : null;
     S.byBarcode = new Map(); S.byKey = new Map(); S.groups = null;
     S.rows = st.rows.map(function (a) {
       var r = { barcode: a[0], style: a[1], colour: a[2], size: a[3], mc: a[4], label: a[5], gender: a[6], cat: a[7], season: a[8], a01: a[9], qty: a[10], mrp: a[11] };
       r.key = norm(r.style + ' ' + (r.colour || 'N/A'));
       var pct = 0, src = '', y = seasonYear(r.season);
-      if (rule.pct && y && y <= rule.maxYear) { pct = rule.pct; src = 'সিজন (A02) ' + rule.maxYear + ' বা আগের'; }
-      for (var i = 0; i < lists.length; i++) {
-        var l = lists[i];
-        if ((l.keys.has(r.key) || l.bcs.has(r.barcode)) && l.pct > pct) { pct = l.pct; src = l.name; }
+      r.pull = !!(pull && (pull.keys.has(r.key) || pull.bcs.has(r.barcode)));
+      if (r.pull) { src = 'পুল লিস্টে আছে · কোনো ডিসকাউন্ট নেই'; }
+      else {
+        if (rule.enabled && rule.pct && y && y <= rule.maxYear) { pct = rule.pct; src = 'সিজন (A02) ' + rule.maxYear + ' বা আগের'; }
+        for (var i = 0; i < lists.length; i++) {
+          var l = lists[i];
+          if ((l.keys.has(r.key) || l.bcs.has(r.barcode)) && l.pct > pct) { pct = l.pct; src = l.name || 'ডিসকাউন্ট লিস্ট'; }
+        }
+        if (pct === 0 && d.defaultPct > 0) { pct = d.defaultPct; src = 'সাধারণ অফার (বাকি সব পণ্য)'; }
       }
       r.pct = pct; r.src = src;
+      r.gid = r.pull ? 'pull' : String(pct);
       r.acc = acc.has(norm(r.label));
-      r.vatPct = r.acc ? (vat.accessories != null ? vat.accessories : 7.5) : (vat.garments != null ? vat.garments : 10);
+      r.vatPct = r.acc ? vat.accessories : vat.garments;
       var disc = r.mrp * pct / 100; r.after = r.mrp - disc; r.discAmt = disc;
       r.vatAmt = r.after * r.vatPct / 100; r.final = r.after + r.vatAmt;
       S.byBarcode.set(r.barcode, r);
@@ -106,14 +113,16 @@
     var tot = sib.reduce(function (a, x) { return a + x.qty; }, 0);
     var c = cls(r.pct);
     var h = '<div class="res">';
-    h += '<div class="band ' + c + '"><div class="pct">' + pctTxt(r.pct) + '%</div><div class="lbl">' +
+    if (r.pull) c = 'pull';
+    if (r.pull) h += '<div class="band pull"><div class="pct">পুল</div><div class="lbl">ডিসপ্লে থেকে উঠিয়ে ফেলুন<small>পুল লিস্টে আছে · কোনো ডিসকাউন্ট নেই</small></div></div>';
+    else h += '<div class="band ' + c + '"><div class="pct">' + pctTxt(r.pct) + '%</div><div class="lbl">' +
       (r.pct > 0 ? 'ডিসকাউন্ট পণ্য' : 'ডিসকাউন্ট নেই') + '<small>' + (r.pct > 0 ? esc(r.src) : 'রেগুলার প্রাইস') + '</small></div></div>';
     h += '<div class="pricebox"><div class="pr"><span>MRP</span><b>৳ ' + fmt(r.mrp) + '</b></div>';
     if (r.pct > 0) {
       h += '<div class="pr minus"><span>ডিসকাউন্ট (' + pctTxt(r.pct) + '%)</span><b>− ৳ ' + fmt(r.discAmt) + '</b></div>';
       h += '<div class="pr"><span>ডিসকাউন্টের পর</span><b>৳ ' + fmt(r.after) + '</b></div>';
     }
-    h += '<div class="pr"><span>ভ্যাট ' + pctTxt(r.vatPct) + '% (' + (r.acc ? 'একসেসোরিজ' : 'গার্মেন্টস/অন্যান্য') + ')</span><b>+ ৳ ' + fmt(r.vatAmt) + '</b></div>';
+    h += '<div class="pr"><span>ভ্যাট ' + pctTxt(r.vatPct) + '% (' + (r.acc ? 'একসেসোরিজ/ফুটওয়্যার' : 'গার্মেন্টস/অন্যান্য') + ')</span><b>+ ৳ ' + fmt(r.vatAmt) + '</b></div>';
     var rounded = Math.round(r.final);
     h += '<div class="pr total"><span>কাস্টমারের দাম<br><small class="muted">ভ্যাটসহ</small></span><b>৳ ' + fmt(rounded) + '</b></div>';
     if (Math.abs(rounded - r.final) > 0.004) h += '<div class="muted small" style="text-align:right">সঠিক হিসাব: ৳ ' + fmt(r.final) + '</div>';
@@ -133,7 +142,7 @@
   function showItem(r, opts) {
     $('#result').innerHTML = itemHTML(r);
     feedback(r.pct);
-    pushHistory({ code: r.barcode, pct: r.pct, title: r.style + (r.colour ? ' · ' + r.colour : '') + (cleanSize(r.size) !== '—' ? ' · ' + r.size : '') });
+    pushHistory({ code: r.barcode, pct: r.pull ? -2 : r.pct, title: r.style + (r.colour ? ' · ' + r.colour : '') + (cleanSize(r.size) !== '—' ? ' · ' + r.size : '') });
     if (!opts || !opts.noScroll) { var el = $('#result'); var top = el.getBoundingClientRect().top; if (top > window.innerHeight * 0.6) window.scrollBy({ top: top - window.innerHeight * 0.45, behavior: 'smooth' }); }
   }
   function showMissing(code) {
@@ -173,9 +182,9 @@
     } catch (e) { }
   }
   function feedback(pct) {
-    var pat = pct >= 50 ? [90, 60, 90] : pct > 0 ? [180] : [50];
+    var pat = pct === -2 ? [300, 100, 300] : pct >= 50 ? [90, 60, 90] : pct > 0 ? [180] : [50];
     if (navigator.vibrate) { try { navigator.vibrate(pat); } catch (e) { } } else { iosHaptic(); }
-    beep(pct >= 50 ? 1200 : pct > 0 ? 900 : pct < 0 ? 300 : 650, pct >= 50 ? 160 : 110);
+    beep(pct === -2 ? 240 : pct >= 50 ? 1200 : pct > 0 ? 900 : pct < 0 ? 400 : 650, pct === -2 ? 380 : pct >= 50 ? 160 : 110);
   }
 
   /* ---------------- History ---------------- */
@@ -188,7 +197,7 @@
     var el = $('#history');
     if (!hist.length) { el.innerHTML = ''; return; }
     el.innerHTML = '<h4>সাম্প্রতিক স্ক্যান</h4>' + hist.map(function (h, i) {
-      return '<button class="hrow" data-h="' + i + '"><i class="dot ' + (h.pct < 0 ? 'miss' : cls(h.pct)) + '"></i><span>' + esc(h.title) + '</span><b>' + (h.pct < 0 ? '' : pctTxt(h.pct) + '%') + '</b></button>';
+      return '<button class="hrow" data-h="' + i + '"><i class="dot ' + (h.pct === -1 ? 'miss' : cls(h.pct)) + '"></i><span>' + esc(h.title) + '</span><b>' + (h.pct === -2 ? 'পুল' : h.pct < 0 ? '' : pctTxt(h.pct) + '%') + '</b></button>';
     }).join('');
   }
   $('#history').addEventListener('click', function (e) {
@@ -210,7 +219,7 @@
     if (!out.length) { showMissing(q); return; }
     if (out.length === 1) { showItem(out[0]); return; }
     $('#result').innerHTML = '<div class="res pad"><b>' + out.length + (out.length === 25 ? '+' : '') + ' টি মিল পাওয়া গেছে</b><div class="matches">' + out.map(function (r) {
-      return '<button type="button" class="match" data-bc="' + esc(r.barcode) + '"><span>' + esc(r.style + ' ' + r.colour) + ' · ' + esc(cleanSize(r.size)) + '</span><b>' + pctTxt(r.pct) + '%</b></button>';
+      return '<button type="button" class="match" data-bc="' + esc(r.barcode) + '"><span>' + esc(r.style + ' ' + r.colour) + ' · ' + esc(cleanSize(r.size)) + '</span><b>' + (r.pull ? 'পুল' : pctTxt(r.pct) + '%') + '</b></button>';
     }).join('') + '</div></div>';
   });
   $('#result').addEventListener('click', function (e) {
@@ -373,33 +382,33 @@
   });
 
   /* ---------------- Display list ---------------- */
-  var L = { pct: null, shown: 100, items: [] };
+  var L = { gid: null, shown: 100, items: [], rows: [] };
   function groupsInfo() {
     if (S.groups) return S.groups;
     var m = new Map();
-    S.rows.forEach(function (r) { var g = m.get(r.pct); if (!g) { g = { pct: r.pct, rows: [], qty: 0, styles: new Set() }; m.set(r.pct, g); } g.rows.push(r); g.qty += r.qty; g.styles.add(r.key); });
-    S.groups = Array.from(m.values()).sort(function (a, b) { return b.pct - a.pct; });
+    S.rows.forEach(function (r) { var g = m.get(r.gid); if (!g) { g = { id: r.gid, pull: r.pull, pct: r.pct, rows: [], qty: 0, styles: new Set() }; m.set(r.gid, g); } g.rows.push(r); g.qty += r.qty; g.styles.add(r.key); });
+    S.groups = Array.from(m.values()).sort(function (a, b) { return (b.pull ? 1e6 : b.pct) - (a.pull ? 1e6 : a.pct); });
     return S.groups;
   }
   function renderList(reset) {
     if (!S.rows.length) return;
     var gs = groupsInfo();
-    if (L.pct == null || !gs.some(function (g) { return g.pct === L.pct; })) L.pct = gs[0].pct;
+    if (L.gid == null || !gs.some(function (g) { return g.id === L.gid; })) L.gid = gs[0].id;
     $('#groupTabs').style.gridTemplateColumns = 'repeat(' + gs.length + ',1fr)';
     $('#groupTabs').innerHTML = gs.map(function (g) {
-      return '<button class="s' + (g.pct >= 50 ? '50' : g.pct > 0 ? '30' : '0') + (g.pct === L.pct ? ' on' : '') + '" data-pct="' + g.pct + '"><b>' + (g.pct > 0 ? pctTxt(g.pct) + '%' : 'নন-ডিসকাউন্ট') + '</b><small>' + fmt(g.qty) + ' পিস · ' + fmt(g.styles.size) + ' স্টাইল</small></button>';
+      var c = g.pull ? 'spull' : g.pct >= 50 ? 's50' : g.pct > 0 ? 's30' : 's0';
+      return '<button class="' + c + (g.id === L.gid ? ' on' : '') + '" data-gid="' + g.id + '"><b>' + (g.pull ? 'পুল করুন' : g.pct > 0 ? pctTxt(g.pct) + '%' : 'নন-ডিসকাউন্ট') + '</b><small>' + fmt(g.qty) + ' পিস · ' + fmt(g.styles.size) + ' স্টাইল</small></button>';
     }).join('');
-    var g = gs.filter(function (x) { return x.pct === L.pct; })[0];
+    var g = gs.filter(function (x) { return x.id === L.gid; })[0];
     var q = norm($('#listSearch').value), cat = $('#listCat').value;
-    // category options for the selected group
     var cm = new Map(); g.rows.forEach(function (r) { cm.set(r.mc, (cm.get(r.mc) || 0) + r.qty); });
     var sel = $('#listCat'), prev = sel.value, opts = '<option value="">সব ক্যাটাগরি</option>' +
       Array.from(cm.keys()).sort().map(function (k) { return '<option value="' + esc(k) + '">' + esc(k || '—') + ' (' + fmt(cm.get(k)) + ')</option>'; }).join('');
-    if (sel.dataset.pct !== String(L.pct) || reset) { sel.innerHTML = opts; sel.dataset.pct = L.pct; sel.value = cm.has(prev) ? prev : ''; cat = sel.value; }
+    if (sel.dataset.gid !== L.gid || reset) { sel.innerHTML = opts; sel.dataset.gid = L.gid; sel.value = cm.has(prev) ? prev : ''; cat = sel.value; }
     var rows = g.rows.filter(function (r) {
       return (!cat || r.mc === cat) && (!q || (r.key + ' ' + r.mc + ' ' + r.cat + ' ' + r.barcode + ' ' + r.label).toUpperCase().indexOf(q) >= 0);
     });
-    L.rows = rows;
+    L.rows = rows; L.g = g;
     var m = new Map();
     rows.forEach(function (r) { var it = m.get(r.key); if (!it) { it = { r: r, qty: 0, sizes: [] }; m.set(r.key, it); } it.qty += r.qty; it.sizes.push(r); });
     L.items = Array.from(m.values());
@@ -414,18 +423,18 @@
     $('#listBody').innerHTML = body || '<p class="muted">কিছু পাওয়া যায়নি।</p>';
     $('#listMore').hidden = L.items.length <= L.shown;
   }
-  $('#groupTabs').addEventListener('click', function (e) { var b = e.target.closest('[data-pct]'); if (!b) return; L.pct = +b.dataset.pct; L.shown = 100; $('#listCat').dataset.pct = ''; renderList(true); });
+  $('#groupTabs').addEventListener('click', function (e) { var b = e.target.closest('[data-gid]'); if (!b) return; L.gid = b.dataset.gid; L.shown = 100; $('#listCat').dataset.gid = ''; renderList(true); });
   $('#listSearch').addEventListener('input', function () { L.shown = 100; renderList(); });
   $('#listCat').addEventListener('change', function () { L.shown = 100; renderList(); });
   $('#listMore').addEventListener('click', function () { L.shown += 200; renderList(); });
   $('#listCsv').addEventListener('click', function () {
     if (!L.rows || !L.rows.length) { toast('এক্সপোর্ট করার মতো কিছু নেই'); return; }
-    var head = ['Barcode', 'Style Code', 'Colour', 'Size', 'Master Category', 'Category', 'Label', 'Season (A02)', 'Stock', 'MRP', 'Discount %', 'Discounted Price', 'VAT %', 'Customer Price (incl. VAT)'];
+    var head = ['Barcode', 'Style Code', 'Colour', 'Size', 'Master Category', 'Category', 'Label', 'Season (A02)', 'Stock', 'MRP', 'Status', 'Discount %', 'Discounted Price', 'VAT %', 'Customer Price (incl. VAT)'];
     var q = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
     var lines = [head.join(',')].concat(L.rows.map(function (r) {
-      return [r.barcode, r.style, r.colour, r.size, r.mc, r.cat, r.label, r.season, r.qty, r.mrp, r.pct, +r.after.toFixed(2), r.vatPct, Math.round(r.final)].map(q).join(',');
+      return [r.barcode, r.style, r.colour, r.size, r.mc, r.cat, r.label, r.season, r.qty, r.mrp, r.pull ? 'PULL' : (r.pct > 0 ? 'DISCOUNT' : 'REGULAR'), r.pct, +r.after.toFixed(2), r.vatPct, Math.round(r.final)].map(q).join(',');
     }));
-    download('﻿' + lines.join('\r\n'), 'display-' + (L.pct > 0 ? L.pct + 'pct' : 'no-discount') + '-' + S.stock.updated + '.csv', 'text/csv;charset=utf-8');
+    download('﻿' + lines.join('\r\n'), 'display-' + (L.g.pull ? 'pull' : L.g.pct > 0 ? L.g.pct + 'pct' : 'no-discount') + '-' + S.stock.updated + '.csv', 'text/csv;charset=utf-8');
   });
 
   function download(text, name, type) {
@@ -436,24 +445,45 @@
 
   /* ---------------- Data tab ---------------- */
   var D = { stock: null, disc: null, dirty: false, stockDirty: false };
-  function resetDraft() { D.disc = JSON.parse(JSON.stringify(S.disc)); D.stock = null; D.dirty = false; D.stockDirty = false; fillRules(); renderLists(); $('#stockPrev').textContent = ''; $('#discPrev').textContent = ''; }
-  function fillRules() {
-    var d = D.disc; d.yearRule = d.yearRule || { maxYear: 2024, pct: 50 }; d.vat = d.vat || { garments: 10, accessories: 7.5, accessoryLabels: [] };
-    $('#ruleYear').value = d.yearRule.maxYear; $('#rulePct').value = d.yearRule.pct;
-    $('#vatGar').value = d.vat.garments; $('#vatAcc').value = d.vat.accessories; $('#accLabels').value = (d.vat.accessoryLabels || []).join(', ');
+  var today = function () { return new Date().toISOString().slice(0, 10); };
+  function resetDraft() {
+    D.disc = JSON.parse(JSON.stringify(S.disc)); D.stock = null; D.dirty = false; D.stockDirty = false;
+    fillRules(); renderLists(); renderChips(); ['#stockPrev', '#discPrev', '#pullPrev'].forEach(function (s) { $(s).textContent = ''; });
   }
+  function fillRules() {
+    var d = D.disc;
+    $('#defPct').value = d.defaultPct; $('#yearOn').checked = d.yearRule.enabled; $('#ruleYear').value = d.yearRule.maxYear; $('#rulePct').value = d.yearRule.pct;
+    $('#vatGar').value = d.vat.garments; $('#vatAcc').value = d.vat.accessories;
+  }
+  function renderChips() {
+    var cnt = new Map(); S.rows.forEach(function (r) { var k = norm(r.label); cnt.set(k, (cnt.get(k) || 0) + 1); });
+    var on = new Set(D.disc.vat.accessoryLabels.map(norm));
+    $('#accChips').innerHTML = Array.from(cnt.keys()).sort().map(function (k) {
+      return '<button type="button" class="chip tog' + (on.has(k) ? ' me' : '') + '" data-lab="' + esc(k) + '">' + esc(k) + ' (' + fmt(cnt.get(k)) + ')</button>';
+    }).join('');
+  }
+  $('#accChips').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-lab]'); if (!b) return; var k = b.dataset.lab, a = D.disc.vat.accessoryLabels;
+    var i = a.indexOf(k); if (i >= 0) a.splice(i, 1); else a.push(k); D.dirty = true; renderChips();
+  });
   function renderLists() {
-    $('#listsBox').innerHTML = (D.disc.lists || []).map(function (l, i) {
-      return '<div class="lrow"><span><b>' + pctTxt(l.pct) + '%</b> · ' + esc(l.name) + '<br><small class="muted">' + fmt((l.keys || []).length + (l.barcodes || []).length) + ' আইটেম · ' + esc(l.added || '') + '</small></span><button data-rm="' + i + '" aria-label="মুছুন">✕</button></div>';
-    }).join('') || '<p class="muted small">কোনো ডিসকাউন্ট লিস্ট নেই।</p>';
+    var d = D.disc, h = '';
+    if (d.pull) h += '<div class="lrow"><span><b style="color:var(--pull)">পুল</b> · ' + esc(d.pull.name) + '<br><small class="muted">' + fmt(d.pull.keys.length + d.pull.barcodes.length) + ' আইটেম · ' + esc(d.pull.added) + '</small></span><button data-rm="pull" aria-label="মুছুন">✕</button></div>';
+    h += d.lists.map(function (l, i) {
+      return '<div class="lrow"><span><b>' + pctTxt(l.pct) + '%</b> · ' + esc(l.name) + '<br><small class="muted">' + fmt(l.keys.length + l.barcodes.length) + ' আইটেম · ' + esc(l.added) + '</small></span><button data-rm="' + i + '" aria-label="মুছুন">✕</button></div>';
+    }).join('');
+    $('#listsBox').innerHTML = h || '<p class="muted small">কোনো ডিসকাউন্ট/পুল লিস্ট নেই।</p>';
   }
   function renderStatus() {
-    var st = S.stock, d = S.disc;
+    var st = S.stock, d = S.disc, pulled = S.rows.filter(function (r) { return r.pull; }).length;
     $('#statusCard').innerHTML = '<h3>বর্তমান ডেটা</h3><div class="muted small">' +
       'স্টক: <b>' + esc(st.updated) + '</b> · ' + fmt(st.count) + ' বারকোড · ' + fmt(st.pieces) + ' পিস · উৎস: ' + (S.src.stock === 'phone' ? 'এই ফোন' : 'GitHub') + '<br>' +
-      'ডিসকাউন্ট: ' + esc(d.updated || '') + ' · উৎস: ' + (S.src.disc === 'phone' ? 'এই ফোন' : 'GitHub') + '<br>' +
-      'নিয়ম: A02 ' + d.yearRule.maxYear + ' বা আগের → ' + d.yearRule.pct + '% · ' + (d.lists || []).map(function (l) { return pctTxt(l.pct) + '% লিস্ট'; }).join(', ') + '<br>' +
-      'ভ্যাট: গার্মেন্টস/অন্যান্য ' + d.vat.garments + '% · একসেসোরিজ ' + d.vat.accessories + '%</div>' +
+      'অফার আপডেট: ' + esc(d.updated || '') + ' · উৎস: ' + (S.src.disc === 'phone' ? 'এই ফোন' : 'GitHub') + '<br>' +
+      'পুল: ' + (d.pull ? fmt(pulled) + ' বারকোড (' + fmt(d.pull.keys.length) + ' স্টাইল-কালার)' : 'নেই') + '<br>' +
+      (d.yearRule.enabled ? 'A02 ' + d.yearRule.maxYear + ' বা আগের → ' + pctTxt(d.yearRule.pct) + '%<br>' : '') +
+      (d.lists.length ? 'লিস্ট: ' + d.lists.map(function (l) { return pctTxt(l.pct) + '%'; }).join(', ') + '<br>' : '') +
+      'বাকি সব পণ্য → ' + (d.defaultPct > 0 ? pctTxt(d.defaultPct) + '%' : 'ডিসকাউন্ট নেই') + '<br>' +
+      'ভ্যাট: গার্মেন্টস/অন্যান্য ' + d.vat.garments + '% · একসেসোরিজ/ফুটওয়্যার ' + d.vat.accessories + '%</div>' +
       '<label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="beepChk" ' + (beepOn() ? 'checked' : '') + '> স্ক্যানে বিপ শব্দ</label>';
     $('#beepChk').addEventListener('change', function (e) { store.set('beep', e.target.checked); });
   }
@@ -465,6 +495,7 @@
   }
   function readFile(f) { return new Promise(function (res, rej) { var r = new FileReader(); r.onload = function () { res(new Uint8Array(r.result)); }; r.onerror = rej; r.readAsArrayBuffer(f); }); }
   function prev(el, msg, ok) { el.className = 'prev ' + (ok ? 'ok' : 'err'); el.textContent = msg; }
+  var baseName = function (f) { return f.name.replace(/\.xlsx?$/i, ''); };
 
   $('#fileStock').addEventListener('change', function (e) {
     var f = e.target.files[0]; if (!f) return; var el = $('#stockPrev'); prev(el, 'পড়া হচ্ছে… (কয়েক সেকেন্ড লাগতে পারে)', true);
@@ -477,37 +508,52 @@
     var f = e.target.files[0]; if (!f) return; var el = $('#discPrev'); var pct = parseFloat($('#listPct').value);
     if (!(pct > 0 && pct < 100)) { prev(el, 'সঠিক ডিসকাউন্ট % দিন', false); e.target.value = ''; return; }
     prev(el, 'পড়া হচ্ছে…', true);
-    loadXLSX().then(function () { return readFile(f); }).then(function (buf) { return SailorParse.parseDiscountList(window.XLSX, buf, pct, pct + '% – ' + f.name.replace(/\.xlsx?$/i, '')); })
+    loadXLSX().then(function () { return readFile(f); }).then(function (buf) { return SailorParse.parseDiscountList(window.XLSX, buf, pct, pctTxt(pct) + '% – ' + baseName(f)); })
       .then(function (l) {
-        D.disc.lists = (D.disc.lists || []).filter(function (x) { return x.pct !== l.pct; }); D.disc.lists.push(l); D.dirty = true; renderLists();
+        D.disc.lists = D.disc.lists.filter(function (x) { return x.pct !== l.pct; }); D.disc.lists.push(l); D.dirty = true; renderLists();
         prev(el, '✓ ' + fmt(l.keys.length + l.barcodes.length) + ' আইটেম যোগ হয়েছে (আগের ' + pctTxt(l.pct) + '% লিস্ট থাকলে বদলে গেছে)। নিচে "প্রয়োগ করুন"।', true);
       }).catch(function (err) { prev(el, err.message || String(err), false); });
     e.target.value = '';
   });
-  $('#listsBox').addEventListener('click', function (e) { var b = e.target.closest('[data-rm]'); if (!b) return; D.disc.lists.splice(+b.dataset.rm, 1); D.dirty = true; renderLists(); });
+  $('#filePull').addEventListener('change', function (e) {
+    var f = e.target.files[0]; if (!f) return; var el = $('#pullPrev'); prev(el, 'পড়া হচ্ছে…', true);
+    loadXLSX().then(function () { return readFile(f); }).then(function (buf) { return SailorParse.parsePullList(window.XLSX, buf, baseName(f)); })
+      .then(function (l) {
+        D.disc.pull = l; D.dirty = true; renderLists();
+        var n = 0, keys = new Set(l.keys); S.rows.forEach(function (r) { if (keys.has(r.key)) n++; });
+        prev(el, '✓ ' + fmt(l.keys.length) + ' স্টাইল-কালার পাওয়া গেছে; বর্তমান স্টকে মিলেছে ' + fmt(n) + ' বারকোড। পুরোনো পুল লিস্ট বদলে গেছে। নিচে "প্রয়োগ করুন"।', true);
+      }).catch(function (err) { prev(el, err.message || String(err), false); });
+    e.target.value = '';
+  });
+  $('#listsBox').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-rm]'); if (!b) return;
+    if (b.dataset.rm === 'pull') D.disc.pull = null; else D.disc.lists.splice(+b.dataset.rm, 1);
+    D.dirty = true; renderLists();
+  });
+  $('#clearOffer').addEventListener('click', function () {
+    if (!confirm('সব ডিসকাউন্ট লিস্ট ও পুল লিস্ট মুছবেন? (নিয়ম ও ভ্যাট থাকবে)')) return;
+    D.disc.lists = []; D.disc.pull = null; D.dirty = true; renderLists(); toast('মুছে ফেলা হয়েছে — নিচে "প্রয়োগ করুন" চাপুন');
+  });
   function readRules() {
     var d = D.disc, n = function (id, dflt) { var v = parseFloat($(id).value); return isNaN(v) ? dflt : v; };
-    var before = JSON.stringify([d.yearRule, d.vat]);
-    d.yearRule = { maxYear: n('#ruleYear', 2024), pct: n('#rulePct', 50), note: (d.yearRule && d.yearRule.note) || '' };
-    d.vat = { garments: n('#vatGar', 10), accessories: n('#vatAcc', 7.5), accessoryLabels: $('#accLabels').value.split(',').map(function (x) { return x.trim().toUpperCase(); }).filter(Boolean) };
-    if (before !== JSON.stringify([d.yearRule, d.vat])) D.dirty = true;
+    var before = JSON.stringify([d.defaultPct, d.yearRule, d.vat.garments, d.vat.accessories]);
+    d.defaultPct = n('#defPct', 0);
+    d.yearRule = { enabled: $('#yearOn').checked, maxYear: n('#ruleYear', 2024), pct: n('#rulePct', 50) };
+    d.vat.garments = n('#vatGar', 10); d.vat.accessories = n('#vatAcc', 7.5);
+    if (before !== JSON.stringify([d.defaultPct, d.yearRule, d.vat.garments, d.vat.accessories])) D.dirty = true;
   }
-  ['#ruleYear', '#rulePct', '#vatGar', '#vatAcc', '#accLabels'].forEach(function (id) { $(id).addEventListener('input', readRules); });
+  ['#defPct', '#yearOn', '#ruleYear', '#rulePct', '#vatGar', '#vatAcc'].forEach(function (id) { $(id).addEventListener('input', readRules); $(id).addEventListener('change', readRules); });
 
   $('#applyLocal').addEventListener('click', function () {
     readRules();
     if (!D.dirty && !D.stockDirty) { toast('কোনো পরিবর্তন নেই'); return; }
     var jobs = [];
     if (D.stockDirty && D.stock) jobs.push(idbSet('stock', D.stock));
-    if (D.dirty) { D.disc.updated = new Date().toISOString().slice(0, 10); jobs.push(idbSet('discounts', D.disc)); }
+    if (D.dirty) { D.disc.updated = today(); jobs.push(idbSet('discounts', D.disc)); }
     Promise.all(jobs).then(function () { return loadData(); }).then(function () { toast('✓ এই ফোনে আপডেট হয়েছে'); });
   });
-  $('#dlStock').addEventListener('click', function () {
-    var st = D.stock || S.stock; download(JSON.stringify(st), 'stock.json'); toast('stock.json ডাউনলোড হয়েছে');
-  });
-  $('#dlDisc').addEventListener('click', function () {
-    readRules(); D.disc.updated = new Date().toISOString().slice(0, 10); download(JSON.stringify(D.disc), 'discounts.json'); toast('discounts.json ডাউনলোড হয়েছে');
-  });
+  $('#dlStock').addEventListener('click', function () { download(JSON.stringify(D.stock || S.stock), 'stock.json'); toast('stock.json ডাউনলোড হয়েছে'); });
+  $('#dlDisc').addEventListener('click', function () { readRules(); D.disc.updated = today(); download(JSON.stringify(D.disc), 'discounts.json'); toast('discounts.json ডাউনলোড হয়েছে'); });
   $('#resetLocal').addEventListener('click', function () {
     if (!confirm('এই ফোনে রাখা ফাইল মুছে GitHub-এর ডেটা ব্যবহার করবেন?')) return;
     Promise.all([idbDel('stock'), idbDel('discounts')]).then(loadData).then(function () { toast('GitHub ডেটায় ফিরে এসেছে'); });
